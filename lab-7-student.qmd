@@ -1,9 +1,13 @@
 ---
 title: "Lab 7: Functions + Fish"
-author: "Your name here!"
+author: "Emi Degembe"
 format: html
 editor: source
 embed-resources: true
+code-tools: true
+code-fold: true
+theme: darkly 
+message: false
 ---
 
 The goal of this lab is learn more about exploring missing data and writing
@@ -11,8 +15,11 @@ modular code.
 
 ```{r}
 #| label: setup
+#| warning: false
 
+library(tidyverse)
 
+df_fish <- read_csv(here::here("data", "BlackfootFish.csv"))
 ```
 
 ## The Data
@@ -45,12 +52,31 @@ measurement errors.
 ```{r}
 #| label: find-missing-values
 
+#source: I asked an upperclassmen who took this class last year and they described in pretty great detail what to put in the across() function (it was verbal). 
+
+df_fish |>
+  summarize(across(trip:species, list(n_miss = ~ sum(is.na(.x)))))
 ```
 
 **2. Create ONE thoughtful visualization that explores the frequency of missing values across the different years, sections, and trips.**
 
 ```{r}
 #| label: visual-of-missing-values-over-time
+
+#creating a new table for plotting 
+#https://chatgpt.com/share/67319b09-cb90-8013-b5a9-3482aec61d91
+
+df_fish |>
+  filter(is.na(weight)) |>
+  ggplot(aes(x = year, fill = section)) + 
+  geom_bar() + 
+  facet_wrap(~ trip, labeller = as_labeller(function(trip) paste("trip", trip))) + 
+  labs(
+        x = "year", 
+        y = "", 
+        title = "count of missing weights over the years by trip and section of river"
+  )
+  
 
 ```
 
@@ -72,7 +98,7 @@ I might write the following `R` code to carry out the rescaling procedure for th
 #| echo: true
 #| eval: false
 
-fish <- fish |> 
+fish <- df_fish |> 
   mutate(length = (length - min(length, na.rm = TRUE)) / 
            (max(length, na.rm = TRUE) - min(length, na.rm = TRUE)), 
          weight = (weight - min(weight, na.rm = TRUE)) / 
@@ -84,6 +110,7 @@ understand the intent of the process. *Additionally, it can make it very difficu
 
 **3. What is the mistake I made in the above rescaling code?**
 
+The mistake made in the code above is in the second variable `weight` is being divided by the minimum length, instead of weight which is what we would need to rescale approportiately. 
 
 When you find yourself copy-pasting lines of code, it's time to write a
 function, instead!
@@ -96,7 +123,44 @@ function, instead!
 ```{r}
 #| label: write-rescale-function
 
+#sources: 
+#help(range)
+
+rescale_01 <- function(vec)
+              {
+                #input validation 
+                if(!is.numeric(vec)) 
+                {
+                  stop("inputted vector is not a numeric data type.")                      
+                }
+  
+                if(length(vec) <= 1)
+                {
+                  stop("inputted vector must contain more than one element.")
+                }
+                range_val <- range(vec, na.rm = TRUE)
+                #range_val[1] = min, range_val[2] = max
+                rescaled = (vec - range_val[1]) / (range_val[2] - range_val[1])
+                return(rescaled)
+              }
+
+#testing the function to make sure it works
+df_fish |>
+    select(weight) |>
+    mutate(weight = rescale_01(weight))
 ```
+testing the function to ensure it works 
+```{r}
+#| label: testing_validation_conditions
+#| eval: false
+
+rescale_01(c("1", "2", "moo")) #should "throw" type error 
+
+rescale_01(C("1")) #should throw invalid length
+
+#yea they throw errors. 
+```
+
 
 ::: callout-tip
 # Efficiency 
@@ -143,8 +207,13 @@ statement in order to create a `length_scaled` variable.
 
 ```{r}
 #| label: compare-original-with-rescaled-lengths
+#| layout-ncol: 2
 
-fish |>  
+#sources: 
+#https://r-charts.com/distribution/histogram-binwidth-ggplot2/
+#https://quarto.org/docs/authoring/figures.html
+
+df_fish |>  
   ggplot(aes(x = length)) + 
   geom_histogram(binwidth = 45) +
   labs(x = "Original Values of Fish Length (mm)") +
@@ -152,6 +221,11 @@ fish |>
 
 # Code for Q7 plot.
 
+df_fish |>  
+  ggplot(aes(x = rescale_01(length))) + 
+  geom_histogram(binwidth = 0.045) +
+  labs(x = "Rescaled Values of Fish Length (mm)") +
+  scale_y_continuous(limits = c(0,4000)) 
 ```
 
 ::: callout-tip
@@ -184,6 +258,43 @@ section of R for Data Science!
 ```{r}
 #| label: rescale-data-frame-function
 
+#sources: 
+#https://chatgpt.com/share/673139f3-590c-8013-934d-40567b76d33c
+
+rescale_column <- function(df, cNames)
+                  {
+                    #validation checking
+                    if(!is.data.frame(df))
+                    {
+                      stop("dataframe inputted is not a dataframe")
+                    }
+  
+                    if(!all(cNames %in% colnames(df)))
+                    {
+                      stop("at least one column names does not exist in the dataframe provided.")
+                    }
+                    
+                    rescaled <- df |>
+                      mutate(
+                              across(all_of(cNames), ~ 
+                                  {
+                                      if (!is.numeric(.)) 
+                                      {
+                                        stop(englue("column {.var} must be numeric data type"))
+                                      }
+                                      if (length(.) <= 1) 
+                                      {
+                                        stop(englue("column {.var} must have more than one value."))
+                                      }
+                                    
+                                      range_ = range(., na.rm = TRUE) 
+                                      (. - range_[1]) / (range_[2] - range_[1])
+                                  }, 
+                                  .names = "{.col}")
+                            )
+                    
+                    return(rescaled)
+}
 ```
 
 **9. Use your `rescale_column()` function to rescale *both* the `length` and `weight` columns.**
@@ -195,4 +306,5 @@ I expect that you carry out this process by calling the `rescale_column()` funct
 ```{r}
 #| label: rescale-two-columns
 
+rescale_column(df_fish, c("length", "weight"))
 ```
